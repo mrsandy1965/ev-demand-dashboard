@@ -15,6 +15,10 @@ from models import load_model, saved_model_exists
 from forecasting import recursive_forecast
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 
+# ──────────────────── Startup Debug ────────────────────
+print("WORKING DIR:", os.getcwd())
+print("FILES:", os.listdir())
+
 # ──────────────────── Page Config ────────────────────
 st.set_page_config(
     page_title="EV Charging Demand Forecasting",
@@ -206,18 +210,23 @@ wide_df, zone_cols = load_wide_csv(uploaded_file if using_uploaded else None)
 
 
 # ──────────────────── Load Saved Model ────────────────────
-if "best_model" not in st.session_state:
-    st.session_state.best_model = None
+try:
+    if "best_model" not in st.session_state:
+        st.session_state.best_model = None
 
-if st.session_state.best_model is None and saved_model_exists():
-    print("[STARTUP] Loading saved model from disk...")
-    st.session_state.best_model = load_model()
-    print("[STARTUP] Model loaded ✅")
+    if st.session_state.best_model is None and saved_model_exists():
+        print("[STARTUP] Loading saved model from disk...")
+        st.session_state.best_model = load_model()
+        print("[STARTUP] Model loaded ✅")
 
-best_model = st.session_state.best_model
+    best_model = st.session_state.best_model
 
-if best_model is None:
-    st.error("⚠️ No saved model found. Please train a model locally and push saved_models/ to the repo.")
+    if best_model is None:
+        st.error("Model file not found in saved_models/")
+        st.stop()
+
+except Exception as e:
+    st.error(f"Model loading failed: {e}")
     st.stop()
 
 

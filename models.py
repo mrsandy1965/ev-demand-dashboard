@@ -10,7 +10,8 @@ import joblib
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor
 
-MODEL_DIR = os.path.join(os.path.dirname(__file__), "saved_models")
+MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "saved_models")
+MODEL_PATH = os.path.join(MODEL_DIR, "best_model.joblib")
 
 
 def train_linear_regression(X_train, y_train):
