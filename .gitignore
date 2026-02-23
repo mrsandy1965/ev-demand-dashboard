@@ -28,3 +28,7 @@ saved_models/
 build/
 dist/
 *.egg-info/
+
+# Presentation files
+*.pptx
+*.ppt
