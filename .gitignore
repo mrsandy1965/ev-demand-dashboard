@@ -1,0 +1,30 @@
+# Virtual Environment
+venv/
+.env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# macOS
+.DS_Store
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Model artifacts
+saved_models/
+*.joblib
+*.pkl
+
+# Logs
+*.log
+
+# Jupyter (if any)
+.ipynb_checkpoints/
+
+# Build files
+build/
+dist/
+*.egg-info/

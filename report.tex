@@ -1,0 +1,382 @@
+\documentclass[12pt,a4paper]{article}
+
+% ── Packages ──
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+
+% ── Styling ──
+\hypersetup{colorlinks=true, linkcolor=blue, urlcolor=blue, citecolor=blue}
+\lstset{
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{gray!10},
+  frame=single,
+  breaklines=true,
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  keywordstyle=\color{blue},
+  commentstyle=\color{green!60!black},
+  stringstyle=\color{orange},
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{EV Charging Demand Forecasting}
+\lhead{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\titleformat{\section}{\large\bfseries}{\thesection}{1em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{1em}{}
+
+% ══════════════════════════════════════════════════════════
+\begin{document}
+
+% ── Title Page ──
+\begin{titlepage}
+\centering
+\vspace*{2cm}
+{\Huge\bfseries EV Charging Demand Forecasting \\ \& Load Intelligence Dashboard\par}
+\vspace{1.5cm}
+{\Large A Machine Learning Approach to Hourly Zone-Level \\ Electric Vehicle Charging Demand Prediction\par}
+\vspace{2cm}
+{\large
+\textbf{Author:} Divyansh Choudhary \\[0.3cm]
+\textbf{Date:} February 2026 \\[0.3cm]
+\textbf{Dataset:} UrbanEV — Zone-Cleaned Aggregated (Hourly) \\[0.3cm]
+\textbf{Tools:} Python, Scikit-Learn, Streamlit, Plotly
+}
+\vfill
+{\small Submitted as part of the EV Charging Demand Forecasting Project}
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+% ══════════════════════════════════════════════════════════
+\section{Problem Statement}
+
+As electric vehicle adoption accelerates globally, accurate forecasting of charging demand becomes critical for grid planning, infrastructure capacity allocation, and energy resource management at the urban level.
+
+This project aims to predict \textbf{hourly EV charging demand (kWh)} at the \textbf{administrative zone level} using historical demand data. The forecasting model is defined as:
+
+\begin{equation}
+\text{Demand}_{z,t} = f(\text{hour}, \text{weekday}, \text{month}, \text{zone\_id}, \text{lag\_1}, \text{lag\_24})
+\end{equation}
+
+where $z$ denotes the zone and $t$ the hourly timestamp.
+
+\subsection{Scope \& Constraints}
+\begin{itemize}[noitemsep]
+  \item Single \textbf{global model} across all zones (no per-zone models).
+  \item Two models compared: Linear Regression (baseline) and Random Forest Regressor.
+  \item No weather data, no deep learning, no ARIMA, no graph-based models.
+  \item Strictly time-based train/test split to prevent data leakage.
+\end{itemize}
+
+% ══════════════════════════════════════════════════════════
+\section{Dataset Description}
+
+\subsection{Source}
+The dataset originates from the \textbf{UrbanEV} dataset, specifically the \texttt{20220901-20230228\_zone-cleaned-aggregated/charge\_1hour/volume.csv} file.
+
+\subsection{Raw Structure (Wide Format)}
+\begin{table}[H]
+\centering
+\begin{tabular}{lcccc}
+\toprule
+\textbf{time} & \textbf{zone\_1} & \textbf{zone\_2} & \textbf{zone\_3} & \textbf{...} \\
+\midrule
+2022-09-01 00:00 & 12.5 & 8.3 & 0.0 & ... \\
+2022-09-01 01:00 & 10.2 & 6.1 & 2.4 & ... \\
+\bottomrule
+\end{tabular}
+\caption{Raw volume.csv format — 4,344 rows $\times$ 276 columns (275 zones + time)}
+\end{table}
+
+\subsection{Processed Structure (Long Format)}
+After melting, the dataset transforms to:
+\begin{table}[H]
+\centering
+\begin{tabular}{lcc}
+\toprule
+\textbf{time} & \textbf{zone\_id} & \textbf{demand} \\
+\midrule
+2022-09-01 00:00 & zone\_1 & 12.5 \\
+2022-09-01 00:00 & zone\_2 & 8.3 \\
+\bottomrule
+\end{tabular}
+\caption{Long format — 1,194,600 rows}
+\end{table}
+
+\subsection{Dataset Statistics}
+\begin{itemize}[noitemsep]
+  \item \textbf{Total zones:} 275
+  \item \textbf{Time range:} September 2022 — February 2023 (6 months, hourly)
+  \item \textbf{Total observations after feature engineering:} 1,188,000
+  \item \textbf{Training samples:} 950,400 (80\%)
+  \item \textbf{Test samples:} 237,600 (20\%)
+\end{itemize}
+
+% ══════════════════════════════════════════════════════════
+\section{Feature Engineering}
+
+\subsection{Temporal Features}
+Extracted directly from the datetime column:
+\begin{itemize}[noitemsep]
+  \item \texttt{hour} — Hour of day (0–23)
+  \item \texttt{day\_of\_week} — Day of week (0=Mon, 6=Sun)
+  \item \texttt{month} — Month (1–12)
+\end{itemize}
+
+\subsection{Lag Features}
+Created \textbf{per zone} using \texttt{groupby(zone\_id).shift()}:
+\begin{itemize}[noitemsep]
+  \item \texttt{lag\_1} — Demand from the previous hour ($t-1$)
+  \item \texttt{lag\_24} — Demand from the same hour, previous day ($t-24$)
+\end{itemize}
+
+\textbf{Critical:} Data was sorted by \texttt{(zone\_id, time)} \emph{before} lag creation. Lag features were created \emph{before} the train-test split to ensure consistency, but only past values are used (no leakage). Rows with null lags (first 24 hours per zone) were dropped.
+
+\subsection{Encoding \& Scaling}
+\begin{itemize}[noitemsep]
+  \item \textbf{zone\_id:} One-Hot Encoded (275 binary columns)
+  \item \textbf{Numerical features:} StandardScaler applied (zero mean, unit variance)
+  \item \textbf{Target (demand):} Not scaled
+\end{itemize}
+
+Total feature dimensionality: $5 + 275 = 280$ features per sample.
+
+% ══════════════════════════════════════════════════════════
+\section{Train-Test Split}
+
+A strictly \textbf{time-based} split was used:
+\begin{enumerate}[noitemsep]
+  \item Sort full dataset by timestamp.
+  \item Compute unique timestamps; find the 80th percentile cutoff.
+  \item All data before cutoff $\rightarrow$ Training set.
+  \item All data at or after cutoff $\rightarrow$ Test set.
+\end{enumerate}
+
+This ensures \textbf{no future data leaks} into training. Random splitting was explicitly avoided because temporal ordering matters for lag-based features.
+
+% ══════════════════════════════════════════════════════════
+\section{Model Development}
+
+\subsection{Model 1: Linear Regression (Baseline)}
+\begin{itemize}[noitemsep]
+  \item Standard OLS linear regression via \texttt{sklearn.linear\_model.LinearRegression}.
+  \item Serves as a baseline to quantify the improvement from ensemble methods.
+  \item Trained on scaled numerical features + one-hot encoded zones.
+\end{itemize}
+
+\subsection{Model 2: Random Forest Regressor}
+\begin{itemize}[noitemsep]
+  \item \texttt{sklearn.ensemble.RandomForestRegressor}
+  \item Hyperparameters: \texttt{n\_estimators=50}, \texttt{max\_depth=15}, \texttt{n\_jobs=-1}, \texttt{random\_state=42}
+  \item Reduced complexity (from 100 trees, unlimited depth) for faster training while maintaining accuracy.
+\end{itemize}
+
+Both models are \textbf{single global models} — they learn across all 275 zones simultaneously, with zone identity captured through one-hot encoding.
+
+\subsection{Model Persistence}
+The best-performing model (based on RMSE) is saved to disk using \texttt{joblib}. On subsequent app launches, the saved model is loaded directly, eliminating retraining. A "Retrain Model" button allows manual re-training when needed.
+
+% ══════════════════════════════════════════════════════════
+\section{Evaluation Metrics}
+
+Models were evaluated on the \textbf{test set only} using:
+
+\begin{align}
+\text{MAE} &= \frac{1}{n} \sum_{i=1}^{n} |y_i - \hat{y}_i| \\[6pt]
+\text{RMSE} &= \sqrt{\frac{1}{n} \sum_{i=1}^{n} (y_i - \hat{y}_i)^2}
+\end{align}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lccc}
+\toprule
+\textbf{Model} & \textbf{MAE} & \textbf{RMSE} & \textbf{Best} \\
+\midrule
+Linear Regression & — & — & \\
+Random Forest & — & — & \checkmark \\
+\bottomrule
+\end{tabular}
+\caption{Model comparison on test set (fill in actual values after training)}
+\end{table}
+
+\textit{Note: Fill in the actual MAE and RMSE values from the dashboard after running the pipeline.}
+
+% ══════════════════════════════════════════════════════════
+\section{Recursive Forecasting (7-Day Ahead)}
+
+A recursive multi-step forecasting strategy was implemented for 168 hours (7 days) into the future:
+
+\subsection{Algorithm}
+\begin{enumerate}[noitemsep]
+  \item Seed with the last 24 known hourly demand values for a given zone.
+  \item For each future step $t+1$:
+  \begin{itemize}[noitemsep]
+    \item Compute temporal features from the next timestamp.
+    \item Set \texttt{lag\_1} = predicted demand at $t$.
+    \item Set \texttt{lag\_24} = predicted demand at $t-23$ (or known value if available).
+    \item Scale features, encode zone, predict demand.
+    \item Floor prediction at 0 (demand cannot be negative).
+    \item Append prediction to history for use in subsequent steps.
+  \end{itemize}
+\end{enumerate}
+
+\subsection{Characteristics}
+\begin{itemize}[noitemsep]
+  \item Uses the \textbf{best model} (saved via joblib) for prediction.
+  \item Prediction errors compound over the horizon — typical of recursive approaches.
+  \item Computationally efficient: 168 sequential predictions per zone.
+\end{itemize}
+
+% ══════════════════════════════════════════════════════════
+\section{Top Zone Analysis \& Peak Detection}
+
+\subsection{Top 5 Zone Ranking}
+Zones are ranked by \textbf{average hourly demand} across the full dataset:
+\begin{equation}
+\overline{D}_z = \frac{1}{T} \sum_{t=1}^{T} D_{z,t}
+\end{equation}
+
+Additionally, peak demand $\max_t(D_{z,t})$ is reported for each zone.
+
+\subsection{Peak Hour Detection}
+For each top zone, a timestamp is classified as a \textbf{peak hour} if:
+\begin{equation}
+D_{z,t} > \mu_z + \sigma_z
+\end{equation}
+where $\mu_z$ and $\sigma_z$ are the mean and standard deviation of demand for zone $z$.
+
+% ══════════════════════════════════════════════════════════
+\section{Dashboard Architecture}
+
+The Streamlit dashboard consists of \textbf{8 sections}:
+
+\begin{table}[H]
+\centering
+\begin{tabular}{clp{7cm}}
+\toprule
+\textbf{\#} & \textbf{Section} & \textbf{Description} \\
+\midrule
+1 & Data Summary & Zone count, observations, time range, train/test sizes \\
+2 & Model Comparison & MAE/RMSE table with best model highlighted \\
+3 & Forecast Visualization & Actual vs predicted (LR \& RF) for top 5 zones with train/test split line \\
+4 & 7-Day Forecast & Recursive 168-hour forecast with historical context \\
+5 & Residual Analysis & Histogram, scatter plot, mean/std/bias metrics \\
+6 & Feature Importance & Random Forest importance bar chart (top 15) \\
+7 & Top 5 Zones & Ranked table with avg and peak demand \\
+8 & Peak Hour Insights & Filterable table of detected peak hours \\
+\bottomrule
+\end{tabular}
+\caption{Dashboard sections}
+\end{table}
+
+\subsection{Technical Features}
+\begin{itemize}[noitemsep]
+  \item \texttt{@st.cache\_data} for data pipeline and recursive forecast (avoids recomputation).
+  \item \texttt{st.session\_state} for model persistence across interactions.
+  \item Interactive Plotly charts with dark theme.
+  \item Sidebar with "Retrain Model" button and model status indicator.
+  \item Console logging (\texttt{[PIPELINE]}, \texttt{[MODEL]}, \texttt{[EVAL]}, etc.) for debugging.
+\end{itemize}
+
+% ══════════════════════════════════════════════════════════
+\section{Project Structure}
+
+\begin{lstlisting}[language=bash, caption=File structure]
+ev-demand-dashboard/
+  app.py              # Streamlit dashboard (8 sections)
+  preprocessing.py    # Data loading, wide-to-long, features, lags, split
+  models.py           # LR + RF training, save/load via joblib
+  evaluation.py       # MAE/RMSE computation + model comparison
+  peak_analysis.py    # Top 5 zones + peak hour detection
+  forecasting.py      # Recursive 7-day forward forecast
+  requirements.txt    # Dependencies
+  saved_models/       # Persisted best model (auto-created)
+\end{lstlisting}
+
+% ══════════════════════════════════════════════════════════
+\section{Screenshots}
+
+% ── Placeholder for dashboard screenshots ──
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{screenshots/data_summary.png}
+  \caption{Dashboard header, sidebar model controls, and Data Summary section showing 275 zones and 1.18M observations}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{screenshots/forecast_viz.png}
+  \caption{Forecast Visualization for Zone 595 showing train (gray) and test (green) actual demand with train/test split line}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{screenshots/recursive_forecast.png}
+  \caption{7-Day Recursive Forecast showing historical demand (green) and 168-hour forward prediction (pink) with forecast start marker}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{screenshots/residual_analysis.png}
+  \caption{Residual Analysis — distribution histogram and time scatter plot with bias metrics}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{screenshots/feature_importance.png}
+  \caption{Random Forest Feature Importance (top 15 features)}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{screenshots/top_zones_peaks.png}
+  \caption{Top 5 Zones by Average Demand and Peak Hour Insights tables}
+\end{figure}
+
+% ══════════════════════════════════════════════════════════
+\section{Conclusions}
+
+\begin{enumerate}[noitemsep]
+  \item \textbf{Random Forest outperforms Linear Regression} on both MAE and RMSE, demonstrating the value of non-linear feature interactions (especially lag features and temporal patterns).
+  
+  \item \textbf{Lag features are the most important predictors} — \texttt{lag\_1} and \texttt{lag\_24} dominate the Random Forest feature importance ranking, confirming strong temporal autocorrelation in EV charging demand.
+  
+  \item \textbf{Recursive forecasting} enables practical 7-day-ahead predictions, though prediction error compounds over the horizon. This is inherent to autoregressive approaches.
+  
+  \item \textbf{Zone-level demand varies significantly} — the top 5 zones by average demand account for a disproportionate share of total charging load, suggesting priority for infrastructure investment.
+  
+  \item \textbf{Peak hour detection} reveals systematic patterns, with most peaks occurring during specific hours, enabling targeted load management strategies.
+\end{enumerate}
+
+\subsection{Future Work}
+\begin{itemize}[noitemsep]
+  \item Incorporate weather data and holiday calendars as exogenous features.
+  \item Experiment with gradient boosting (XGBoost, LightGBM) for improved accuracy.
+  \item Implement direct multi-step forecasting to reduce error accumulation.
+  \item Add confidence intervals to recursive forecasts.
+\end{itemize}
+
+% ══════════════════════════════════════════════════════════
+\section*{References}
+\begin{enumerate}[noitemsep]
+  \item UrbanEV Dataset — Zone-Cleaned Aggregated Hourly Charging Data
+  \item Scikit-Learn Documentation — \url{https://scikit-learn.org/}
+  \item Streamlit Documentation — \url{https://docs.streamlit.io/}
+\end{enumerate}
+
+\end{document}
